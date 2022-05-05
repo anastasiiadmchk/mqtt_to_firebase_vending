@@ -24,7 +24,7 @@
 #COMMAND
 #  brew services start mosquitto -d
 # ./mqtt2firebase.py -a 'vendbmr-firebase-adminsdk-30urz-ba6f5524e1.json' -N 'vendbmr-default-rtdb' -t 'mobileapp/1/identifier1#' -v
-import firebase_admin
+# import firebase_admin
 from firebase_admin import credentials
 
 # Firebase service account
@@ -111,9 +111,11 @@ def on_connect(client, userdata, flags, rc):
     # Subscribing in on_connect() means that if we lose the connection and
     # reconnect then subscriptions will be renewed.
     print("on_connect", mqtt.connack_string(rc))
-    client.subscribe('mobileapp/1/identifier1', qos=1)
-    # for topic in topics:
-    #   client.subscribe(topic['mqttTopic'])
+    # client.subscribe('mobileapp/device-01/beverages/coca-cola/#', qos=1)
+
+    for topic in topics:
+      client.subscribe(topic['mqttTopic'] +'/#', qos=1)
+
 
 def on_disconnect(client, userdata, rc):
     debug("Disconnected with result code "+str(rc))
@@ -121,21 +123,18 @@ def on_disconnect(client, userdata, rc):
       debug("Unexpected disconnection.")
 
 def on_message(client, userdata, msg):
+    print(msg.topic)
     for topic in topics:
-      if topic['mqttTopicRegex'].match(msg.topic):
-        sensorName = msg.topic.split('/') [-1]
-        debug("Received message from {0} matching {3} with payload {1} to be published to {2}".format(msg.topic, str(msg.payload), sensorName, topic['mqttTopic']))
-        nodeData = msg.payload
-        payload = "Received message from {0} matching {3} with payload {1} to be published to {2}".format(msg.topic, str(msg.payload), sensorName, topic['mqttTopic'])
+        productName = msg.topic.split('/') [-2] + '/'+ msg.topic.split('/') [-1]
+        debug("Received message from {0} matching {3} with payload {1} to be published to {2}".format(msg.topic, str(msg.payload), productName, topic['mqttTopic']))
+        nodeData = msg.payload.decode('utf-8')
+        payload = "Received message from {0} matching {3} with payload {1} to be published to {2}".format(msg.topic, str(msg.payload), productName, topic['mqttTopic'])
         print(nodeData)
-        dict1 = {msg.topic: str(msg.payload)}
-        dict2 = {sensorName:topic['mqttTopic']}
+        dict1 = {msg.topic.split('/') [-1]: nodeData}
+        dict2 = {msg.topic: topic['mqttTopic']}
         newObject = json.dumps([dict1, dict2])
-        # newObject = json.loads(nodeData.decode('utf-8'))
-        # print(newObject)
-        #sendToFirebase(sensorName, newObject)
         queue.put({
-          "topic": sensorName,
+          "topic": msg.topic,
           "payload": newObject,
           "config": topic
         })
@@ -154,8 +153,6 @@ parser.add_argument('-n', '--dry-run', dest='dryRun', action="store_true", defau
 parser.add_argument('-N', '--firebase-app-name', dest='firebaseAppName', action="store",
                    help='The firebase application name / Can also be read from FIREBASE_APP_NAME env var.',
                    **environ_or_required('FIREBASE_APP_NAME'))
-# parser.add_argument('-p', '--firebase-path', dest='firebasePath', action="store", default="/readings",
-#                    help='The firebase path where the payload will be saved')
 parser.add_argument('-t', '--topic', dest='topics', action="append",
                    help='The MQTT topic on which to get the payload and the Firebase path, don\'t forget the trailing #. Can be called many times.')
 parser.add_argument('-T', '--topic-error', dest='topicError', action="store", default="error/firebase", metavar="TOPIC",
@@ -166,7 +163,7 @@ parser.add_argument('-v', '--verbose', dest='verbose', action="store_true", defa
 
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
-# "-a 'vendbmr-firebase-adminsdk-30urz-ba6f5524e1.json' -N 'vendbmr-default-rtdb' -n -v"
+
 args = parser.parse_args()
 verbose = args.verbose
 
@@ -185,11 +182,13 @@ scopes = [
 topics = []
 for topic in args.topics:
   newTopic = {
-    "mqttTopic": topic.split('/')[2],
-    "firebasePath": topic.split('/')[1],
+    "mqttTopic": topic,
+    "firebasePath": '/#',
     "topicAsChild": False
   }
+  print(newTopic)
   newTopic["mqttTopicRegex"] = re.compile('^' + newTopic["mqttTopic"].replace('#', ''))
+  print(newTopic["mqttTopicRegex"])
   if newTopic["firebasePath"].endswith('/#'):
     newTopic["topicAsChild"] = True
     newTopic["firebasePath"] = newTopic["firebasePath"][:-2]
@@ -202,13 +201,10 @@ if isFile:
   # = credentials.Certificate("vendbmr-firebase-adminsdk-30urz-ba6f5524e1.json")
   # firebase_admin.initialize_app(credentials)
   
-  # = service_account.Credentials.Certificate("vendbmr-firebase-adminsdk-30urz-ba6f5524e1.json")
-  
 else:
   credentials = service_account.Credentials.from_service_account_info(
       pathOrCredentials, scopes=scopes)
   # credentials.Certificate("vendbmr-firebase-adminsdk-30urz-ba6f5524e1.json")
-  # firebase_admin.initialize_app(credentials)
   
 
 queue = Queue()
@@ -217,7 +213,7 @@ t1 = threading.Thread(target=process_firebase_messages, args=[queue, stop_event]
 t1.daemon = True
 t1.start()
 
-client = mqtt.Client(client_id='1')
+client = mqtt.Client()
 client.on_connect = on_connect
 client.on_disconnect = on_disconnect
 client.on_message = on_message
