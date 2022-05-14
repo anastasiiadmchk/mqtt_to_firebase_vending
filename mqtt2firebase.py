@@ -133,9 +133,10 @@ def on_message(client, userdata, msg):
         dict1 = {msg.topic.split('/') [-1]: nodeData}
         dict2 = {msg.topic: topic['mqttTopic']}
         newObject = json.dumps([dict1, dict2])
+        jsn = {"number": nodeData}
         queue.put({
           "topic": msg.topic,
-          "payload": newObject,
+          "payload": jsn,
           "config": topic
         })
 
